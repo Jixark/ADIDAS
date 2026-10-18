@@ -1,0 +1,15 @@
+# Fuente de datos de Grafana hacia la base adidas3d.
+# Copiar a <grafana>/conf/provisioning/datasources/ y definir PG_PASS en el entorno.
+apiVersion: 1
+datasources:
+  - name: adidas3d
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: localhost:5432
+    user: postgres
+    jsonData:
+      database: adidas3d
+      sslmode: disable
+      postgresVersion: 1500
+    secureJsonData:
+      password: ${PG_PASS}

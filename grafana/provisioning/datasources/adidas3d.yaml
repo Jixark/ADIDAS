@@ -1,0 +1,15 @@
+# Copiar a <grafana>/conf/provisioning/datasources/
+# Define la contrasena en la variable de entorno ADIDAS_PG_PASS antes de iniciar Grafana.
+apiVersion: 1
+datasources:
+  - name: adidas3d
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: localhost:5432
+    user: postgres
+    jsonData:
+      database: adidas3d
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: $ADIDAS_PG_PASS

@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adidas x KidZania - Experience</title>
+
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="stylesheet" href="./css/index.css?v=20260918-name-bottom">
+
+</head>
+
+<body class="gallery-lab" id="mainBody">
+
+    <div class="experience-container">
+        <div class="main-layout">
+            <!-- <div class="info-card">
+                <h1 id="user-name">---</h1>
+                <div class="info-row">
+                    <span class="info-label">Prenda:</span>
+                    <span class="info-value" id="card-prenda">---</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Color:</span>
+                    <span class="info-value" id="card-color">---</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Emblema:</span>
+                    <span class="info-value" id="card-emblema">---</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Textura:</span>
+                    <span class="info-value" id="card-textura">---</span>
+                </div>
+            </div> -->
+            <h1 id="user-name" style="color: white; text-transform: uppercase; font-family: 'Adineue Pro','Helvetica',sans-serif; padding: 0; margin: 0;"></h1>
+            <div class="viewer-wrapper">
+                <!-- <model-viewer id="garment" src="" alt="Adidas Custom Garment" -->
+                <model-viewer id="garment" src="" alt="Adidas Custom Garment" auto-rotate
+                    camera-controls shadow-intensity="1" environment-image="neutral" exposure="1" touch-action="pan-y"
+                    rotation-per-second="30deg" interaction-prompt="none">
+                </model-viewer>
+            </div>
+
+
+
+        </div>
+        <img id="initial-image" class="initial-image" src="./img/adidasb.png" alt="Adidas inicial">
+    </div>
+
+    <script>
+
+        function setTheme(themeName) {
+            const body = document.getElementById('mainBody');
+            body.className = themeName;
+        }
+
+        const modelViewer = document.querySelector('#garment');
+        const initialImage = document.getElementById('initial-image');
+        const experienceContainer = document.querySelector('.experience-container');
+        const CRON_INTERVAL_MS = 180_000;
+        const IMAGE_APPEAR_MS = 4_000;
+        const MODEL_APPEAR_MS = 3_000;
+        const MODEL_VISIBILITY_MS = 25_000;
+
+        function showModel() {
+            if (initialImage) {
+                initialImage.classList.add('hidden');
+                initialImage.classList.remove('showing');
+            }
+            if (modelViewer) {
+                modelViewer.classList.remove('model-switching');
+                modelViewer.classList.remove('model-switching-enter');
+                modelViewer.classList.add('visible');
+            }
+        }
+
+        function showInitial() {
+            experienceContainer?.classList.add('logo-visible');
+            if (initialImage) {
+                initialImage.classList.remove('hidden');
+                initialImage.classList.add('showing');
+            }
+        }
+
+        function hideInitial() {
+            if (initialImage) {
+                initialImage.classList.add('hidden');
+                initialImage.classList.remove('showing');
+            }
+            // El nombre aparece al mismo tiempo que el modelo, mientras el logo se desvanece encima.
+            experienceContainer?.classList.remove('logo-visible');
+        }
+
+        function getSrcModel(productId) {
+            if (!productId) return null;
+
+            const valor = String(productId).trim().replace(/^['"]|['"]$/g, '');
+            if (!valor) return null;
+
+            const limpio = valor
+                .replace(/^\.\/glb\//i, '')
+                .replace(/^\//, '')
+                .replace(/\\/g, '/');
+
+            const sinExtension = limpio.toLowerCase().endsWith('.glb')
+                ? limpio.slice(0, -4)
+                : limpio;
+
+            return `./glb/${sinExtension}.glb`;
+        }
+
+        function getProductId(data) {
+            const candidatos = [
+                data?.product_id,
+                data?.productId,
+                data?.customisation?.product_id,
+                data?.customisation?.productId,
+                data?.payload?.product_id,
+                data?.payload?.productId,
+                data?.session?.product_id,
+                data?.session?.productId,
+            ];
+
+            return candidatos.find((valor) => typeof valor === 'string' && valor.trim()) || null;
+        }
+
+        function delay(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+
+        function resetModelViewer() {
+            if (!modelViewer) return;
+            modelViewer.classList.remove('visible');
+            modelViewer.classList.remove('loaded');
+            modelViewer.classList.remove('model-switching');
+            modelViewer.classList.remove('model-switching-enter');
+            modelViewer.classList.remove('variant-switching');
+            modelViewer.removeAttribute('src');
+            modelViewer.variantName = undefined;
+            try { modelViewer.jumpCameraToDefault(); } catch (e) {}
+            setTimeout(() => { modelViewer.autoRotate = true; }, 0);
+        }
+
+        async function loadModel(productId) {
+            const nuevoSrc = getSrcModel(productId);
+            if (!nuevoSrc) return;
+
+            // Reanudar rotación en cada carga
+            modelViewer.autoRotate = true;
+
+            const mismoSrc = modelViewer.getAttribute('src') === nuevoSrc;
+
+            if (!mismoSrc) {
+
+                modelViewer.classList.remove('visible');
+                modelViewer.classList.remove('loaded');
+                modelViewer.classList.add('model-switching');
+                // El GLB nuevo no debe heredar la variante activa del modelo anterior.
+                modelViewer.variantName = null;
+
+                await delay(10);
+
+                modelViewer.src = nuevoSrc;
+                modelViewer.setAttribute('src', nuevoSrc);
+
+                modelViewer.classList.remove('model-switching');
+                modelViewer.classList.add('model-switching-enter');
+
+                await new Promise((resolve) => {
+                    let completado = false;
+
+                    const endChangeModel = () => {
+                        if (completado) return;
+                        completado = true;
+                        modelViewer.classList.add('loaded');
+                        modelViewer.classList.remove('model-switching-enter');
+                        modelViewer.removeEventListener('load', handleLoad);
+                        modelViewer.removeEventListener('error', handleError);
+                        resolve();
+                    };
+
+                    const handleLoad = () => {
+                        endChangeModel();
+                    };
+
+                    const handleError = () => {
+                        endChangeModel();
+                    };
+
+                    modelViewer.addEventListener('load', handleLoad, { once: true });
+                    modelViewer.addEventListener('error', handleError, { once: true });
+
+                    setTimeout(() => {
+                        endChangeModel();
+                    }, 4000);
+                });
+            }
+
+            showModel();
+        }
+
+        function getValue(valor) {
+            if (typeof valor !== 'string') return '';
+
+            const texto = valor.trim();
+            if (!texto) return '';
+
+            const ultimoGuion = texto.lastIndexOf('_');
+            if (ultimoGuion === -1) return texto;
+
+            return texto.slice(ultimoGuion + 1).trim();
+        }
+
+        async function applyVariant(nombre) {
+            if (!modelViewer || !nombre) return false;
+
+            const variantesDisponibles = Array.from(modelViewer.availableVariants || []);
+            if (variantesDisponibles.length && !variantesDisponibles.includes(nombre)) {
+                console.warn(`La variante "${nombre}" no existe en ${modelViewer.getAttribute('src')}.`);
+                return false;
+            }
+
+            modelViewer.classList.add('variant-switching');
+            return new Promise((resolve) => {
+                let tiempoEspera;
+
+                const fin = (aplicada) => {
+                    clearTimeout(tiempoEspera);
+                    modelViewer.removeEventListener('variant-applied', alAplicar);
+                    modelViewer.classList.remove('variant-switching');
+                    resolve(aplicada);
+                };
+
+                const alAplicar = () => fin(true);
+                modelViewer.addEventListener('variant-applied', alAplicar, { once: true });
+                tiempoEspera = setTimeout(() => {
+                    console.warn(`Tiempo de espera al aplicar la variante "${nombre}".`);
+                    fin(false);
+                }, 1_000);
+
+                // Siempre se reasigna: la misma variante puede pertenecer a un GLB recién cargado.
+                modelViewer.variantName = nombre;
+            });
+        }
+
+        function getPersonalizationVariants(personalization) {
+            if (Array.isArray(personalization)) {
+                return personalization.map((variante) => String(variante).trim()).filter(Boolean);
+            }
+
+            if (typeof personalization === 'string') {
+                return personalization.split(',').map((variante) => variante.trim()).filter(Boolean);
+            }
+
+            return [];
+        }
+
+        modelViewer.addEventListener('load', () => {
+            showModel();
+        });
+
+modelViewer.addEventListener('error', () => {
+    resetModelViewer();
+    showInitial();
+});
+
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (!modelViewer.hasAttribute('src') || modelViewer.getAttribute('src')) {
+                    hideInitial();
+                }
+            }, 300);
+        });
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const screen = urlParams.get('screen') || '1';
+        const API_PORT = urlParams.get('api_port') || '4000';
+
+        const socket = io(`http://localhost:${API_PORT}`, {
+            query: { screen: screen }
+        });
+
+        const diccionario = {
+            "01": "jaguar",
+            "02": "zebra",
+            "03": "forest",
+            "no": "-"
+        }
+
+socket.on('newCustomisation', async (data) => {
+    try {
+        const esEventoPantalla = !data.screen || data.screen === screen;
+        if (esEventoPantalla) {
+            const customisationStartedAt = Date.now();
+            const userName = document.getElementById('user-name');
+
+            // Actualizarlo antes de la transición para que aparezca listo al retirar el logo.
+            if (data.user_name && userName) userName.innerText = data.user_name;
+            const variantes = getPersonalizationVariants(data.personalization);
+
+            showInitial();
+            await delay(IMAGE_APPEAR_MS);
+
+                    //if (data.product_type) document.getElementById('card-prenda').innerText = data.product_type;
+
+                    const productId = getProductId(data);
+                    if (productId) {
+                        modelViewer.autoRotate = true;
+                        try { modelViewer.jumpCameraToDefault(); } catch (e) {}
+                        await loadModel(productId);
+                    } else {
+                        console.warn('No se encontró product_id en el payload:', data);
+                    }
+
+                    for (const variante of variantes) {
+                        const valor = getValue(variante);
+
+                        if (typeof valor === 'string' && valor) {
+                            const varianteLower = variante.toLowerCase();
+
+                            if (varianteLower.startsWith('var_color_') && !varianteLower.includes('detalles')) {
+                                //document.getElementById('card-color').innerText = getValue(varianteLower);
+                            }
+
+                            if (varianteLower.startsWith('var_emb_')) {
+                                //document.getElementById('card-emblema').innerText = getValue(varianteLower);
+                            }
+
+                            if (varianteLower.startsWith('var_texture_')) {
+                                //document.getElementById('card-textura').innerText = diccionario[getValue(varianteLower)];
+                            }
+                        }
+                    }
+
+                    for (const variante of variantes) {
+                        await applyVariant(variante);
+                    }
+
+                    hideInitial();
+                }
+            } catch (error) {
+                console.error('Error al aplicar personalización:', error);
+            }
+        });
+
+socket.on('sessionClosed', async (data) => {
+
+    if (data.screen === screen) {
+        // console.log(`Sesión cerrada en pantalla ${screen}. Reiniciando visualizador.`);
+        // document.getElementById('user-name').innerText = '---';
+        // document.getElementById('card-prenda').innerText = '---';
+        // document.getElementById('card-color').innerText = '---';
+        // document.getElementById('card-emblema').innerText = '---';
+        // document.getElementById('card-textura').innerText = '---';
+
+        resetModelViewer();
+        showInitial();
+    }
+
+});
+
+    </script>
+
+</body>
+
+</html>

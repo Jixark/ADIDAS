@@ -1,0 +1,54 @@
+graph TB
+    subgraph "Cliente Final"
+        T[Tablet/Kiosco\nSelección UI]
+    end
+
+    subgraph "Backend KidZania"
+        API[REST API\nPuerto 4000]
+        WS[WebSocket Server\nSocket.io]
+        API --> WS
+    end
+
+    subgraph "Visor Multi-Pantalla"
+        V1[index.html?screen=1\nmodel-viewer + Side Panel]
+        V2[index.html?screen=2\nmodel-viewer + Side Panel]
+        V3[index.html?screen=3\nmodel-viewer + Side Panel]
+    end
+
+    subgraph "Contenedor Físico"
+        VF[visor.html\n3 iframes horizontal]
+        VF --> V1
+        VF --> V2
+        VF --> V3
+    end
+
+    T -->|HTTPS/REST| API
+    WS -.->|WS: newCustomisation| V1
+    WS -.->|WS: newCustomisation| V2
+    WS -.->|WS: newCustomisation| V3
+    WS -.->|WS: sessionClosed| V1
+    WS -.->|WS: sessionClosed| V2
+    WS -.->|WS: sessionClosed| V3
+
+    subgraph "Assets Estáticos"
+        GLB[(/glb/*.glb\n21 modelos ~150MB)]
+        IMG[(/img/*.png\nBranding/Backgrounds)]
+        CSS[(/css/index.css\nTemas Gallery/Urban)]
+    end
+
+    V1 --> GLB
+    V2 --> GLB
+    V3 --> GLB
+    V1 --> CSS
+    V2 --> CSS
+    V3 --> CSS
+    V1 --> IMG
+    V2 --> IMG
+    V3 --> IMG
+
+
+
+    class T client;
+    class API,WS backend;
+    class V1,V2,V3,VF viewer;
+    class GLB,IMG,CSS assets;

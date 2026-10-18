@@ -1,0 +1,2458 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <title>kidzania-adidas</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" id="metaViewport" content="user-scalable=no, initial-scale=1, width=device-width, viewport-fit=cover" data-tdv-general-scale="0.5"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <script src="lib/tdvplayer.js?v=1784877175816"></script>
+    <link rel="shortcut icon" href="favicon.ico?v=1784877175816">
+	<link rel="icon" sizes="48x48 32x32 16x16" href="favicon.ico?v=1784877175816">
+	<link rel="apple-touch-icon" type="image/png" sizes="180x180" href="misc/icon180.png?v=1784877175816">
+	<link rel="icon" type="image/png" sizes="16x16" href="misc/icon16.png?v=1784877175816">
+	<link rel="icon" type="image/png" sizes="32x32" href="misc/icon32.png?v=1784877175816">
+	<link rel="icon" type="image/png" sizes="192x192" href="misc/icon192.png?v=1784877175816">
+	<link rel="preload" href="locale/es.txt?v=1784877175816" as="fetch" crossorigin="anonymous"/>
+	<link rel="preload" href="script.js?v=1784877175816" as="script"/>
+	<meta name="description" content="Virtual Tour"/>
+	<meta name="theme-color" content="#CCCCCC"/>
+    <script>
+        (function () {
+            'use strict';
+
+            /*
+             * ======================================================
+             * CONFIGURACIÓN GLOBAL DE LA API KIDZANIA
+             * ======================================================
+             *
+             * La IP se obtiene automáticamente de la URL con la que
+             * se abrió esta página.
+             *
+             * Ejemplo:
+             *   Página: http://192.168.1.66:5500/index.htm?tablet_id=1
+             *   API:    http://192.168.1.66:4000
+             *
+             * Se utiliza HTTP de forma intencional.
+             */
+
+
+            // var hostname =
+            //     window.location.hostname ||
+            //     '192.168.1.66';
+
+            // window.KIDZANIA_API_BASE =
+            //     'http://' + hostname + ':4000';
+
+            //window.KIDZANIA_API_BASE ='https://api-tour.multimediacorp.com.mx';
+            //window.KIDZANIA_API_BASE = 'http://localhost:4000';
+            
+            var hostname = window.location.hostname;
+			window.KIDZANIA_API_BASE = 'http://' + hostname + ':4000';
+
+            /*
+             * Construye una URL completa de la API.
+             *
+             * Ejemplos:
+             *   window.kidzaniaApi('/sessions')
+             *   window.kidzaniaApi('/sessions/close')
+             *   window.kidzaniaApi('/customise')
+             */
+            window.kidzaniaApi = function (ruta) {
+                ruta = String(ruta || '');
+
+                if (ruta.charAt(0) !== '/') {
+                    ruta = '/' + ruta;
+                }
+
+                return window.KIDZANIA_API_BASE + ruta;
+            };
+
+            /*
+             * Respaldo para acciones antiguas de 3DVista que todavía
+             * tengan localhost o 127.0.0.1 escritos directamente.
+             *
+             * Cualquier fetch a:
+             *   http://localhost:4000/...
+             *   http://127.0.0.1:4000/...
+             *
+             * se redirige automáticamente al hostname actual.
+             */
+            if (!window.__KIDZANIA_FETCH_INTERCEPTADO__) {
+                window.__KIDZANIA_FETCH_INTERCEPTADO__ = true;
+
+                var fetchOriginal =
+                    window.fetch.bind(window);
+
+                function obtenerTipoOperacionApi(url) {
+                    if (/\/customise(?:\?|$)/i.test(url)) {
+                        return 'display';
+                    }
+
+                    if (/\/sessions\/close(?:\?|$)/i.test(url)) {
+                        return 'cierre';
+                    }
+
+                    if (/\/sessions(?:\?|$)/i.test(url)) {
+                        return 'inicio';
+                    }
+
+                    return 'general';
+                }
+
+                function avisarFalloApi(tipo) {
+                    if (
+                        typeof window.mostrarAlertaConexionApi ===
+                        'function'
+                    ) {
+                        window.mostrarAlertaConexionApi(tipo);
+                    }
+                }
+
+                window.fetch = function (recurso, opciones) {
+                    var recursoFinal = recurso;
+                    var urlFinal = '';
+
+                    if (typeof recurso === 'string') {
+                        recursoFinal = recurso
+                            .replace(
+                                /^https?:\/\/localhost:4000(?=\/|$)/i,
+                                window.KIDZANIA_API_BASE
+                            )
+                            .replace(
+                                /^https?:\/\/127\.0\.0\.1:4000(?=\/|$)/i,
+                                window.KIDZANIA_API_BASE
+                            );
+
+                        urlFinal = recursoFinal;
+
+                        if (recursoFinal !== recurso) {
+                            console.log(
+                                'API redirigida:',
+                                recurso,
+                                '→',
+                                recursoFinal
+                            );
+                        }
+                    } else if (recurso && recurso.url) {
+                        urlFinal = recurso.url;
+                    }
+
+                    var esPeticionKidzania =
+                        urlFinal.indexOf(
+                            window.KIDZANIA_API_BASE
+                        ) === 0;
+
+                    var tipoOperacion =
+                        obtenerTipoOperacionApi(urlFinal);
+
+                    var opcionesFinales =
+                        Object.assign({}, opciones || {});
+
+                    var controlador = null;
+                    var temporizador = null;
+
+                    /*
+                     * Las acciones generadas dentro de 3DVista, como
+                     * /customise, no usan el helper del index. Por eso el
+                     * interceptor añade también un límite de espera.
+                     * Si la llamada ya trae una signal, respeta la existente.
+                     */
+                    if (
+                        esPeticionKidzania &&
+                        !opcionesFinales.signal &&
+                        typeof window.AbortController === 'function'
+                    ) {
+                        controlador =
+                            new window.AbortController();
+
+                        opcionesFinales.signal =
+                            controlador.signal;
+
+                        temporizador =
+                            setTimeout(
+                                function () {
+                                    controlador.abort();
+                                },
+                                window.KIDZANIA_API_TIMEOUT_MS ||
+                                    8000
+                            );
+                    }
+
+                    return fetchOriginal(
+                        recursoFinal,
+                        opcionesFinales
+                    )
+                    .then(function (response) {
+                        if (temporizador) {
+                            clearTimeout(temporizador);
+                        }
+
+                        /*
+                         * fetch no rechaza automáticamente los HTTP 4xx/5xx.
+                         * Se muestra el aviso aquí y el código original puede
+                         * seguir procesando o lanzar su propio error.
+                         */
+                        if (
+                            esPeticionKidzania &&
+                            !response.ok
+                        ) {
+                            avisarFalloApi(tipoOperacion);
+                        }
+
+                        return response;
+                    })
+                    .catch(function (error) {
+                        if (temporizador) {
+                            clearTimeout(temporizador);
+                        }
+
+                        if (esPeticionKidzania) {
+                            avisarFalloApi(tipoOperacion);
+                        }
+
+                        throw error;
+                    });
+                };
+            }
+
+            console.log(
+                'API KidZania configurada:',
+                window.KIDZANIA_API_BASE
+            );
+        })();
+    </script>
+    <script src="script.js?v=1784877175816"></script>
+    <style type="text/css">
+        html, body { height:100%; width:100%; height:100vh; width:100vw; margin:0; padding:0; overflow:hidden; }
+        .fill-viewport { position:fixed; top:0; left:0; right:0; bottom:0; padding:0; margin:0; overflow: hidden; }
+        .fill-viewport.landscape-left { left: env(safe-area-inset-left); }
+		.fill-viewport.landscape-right { right: env(safe-area-inset-right); }
+        #viewer { z-index:1; }
+        #ui-layer { z-index:2147483647 !important; pointer-events:auto; }
+        #nombreForm, #miInput { pointer-events:auto; touch-action:manipulation; }
+        #miInput { user-select:text; -webkit-user-select:text; caret-color:#000000; }
+        #preloadContainer { z-index:2; opacity:0; background-color:rgba(204,204,204,1); transition: opacity 0.5s; -webkit-transition: opacity 0.5s; -moz-transition: opacity 0.5s; -o-transition: opacity 0.5s;}
+
+
+        /*
+         * Ajuste del formulario para tablet horizontal.
+         * El proyecto de 3DVista usa una escala general de 0.5,
+         * por eso estos valores son mayores para obtener el tamaño
+         * visual esperado en la pantalla de la tablet.
+         */
+        @media (min-width: 700px) and (orientation: landscape) {
+            #ui-layer {
+                top: 59% !important;
+                width: min(180.37vw, 2296px) !important;
+                max-width: none !important;
+                transform: translate(-50%, -50%) !important;
+                transform-origin: center center !important;
+            }
+
+            #nombreForm fieldset {
+                width: 100% !important;
+                height: 195px !important;
+                padding: 0 82px !important;
+                box-sizing: border-box !important;
+                border: 4.5px solid #b7b7b7 !important;
+                border-radius: 2.7px !important;
+                background-color: rgba(255, 255, 255, 0.04) !important;
+                box-shadow: none !important;
+            }
+
+            #nombreForm legend {
+                margin-left: 14.4px !important;
+                padding: 0 33.3px !important;
+                color: #999999 !important;
+                background-color: transparent !important;
+                font-size: 35px !important;
+                font-weight: 600 !important;
+                letter-spacing: 3px !important;
+                line-height: 1 !important;
+            }
+
+            #miInput {
+                display: block !important;
+                width: 100% !important;
+                height: 145px !important;
+                margin: 0 !important;
+                padding: 0 10.8px !important;
+                box-sizing: border-box !important;
+                border: none !important;
+                outline: none !important;
+                background: transparent !important;
+
+                color: #111111 !important;
+
+                font-family: Arial, Helvetica, sans-serif !important;
+                font-size: 52px !important;
+                font-weight: 400 !important;
+                letter-spacing: 2px !important;
+
+                line-height: 145px !important;
+                text-align: left !important;
+                text-transform: uppercase !important;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="fonts.css?v=1784877175816">
+</head>
+<body>
+    <div
+        id="container"
+        style="
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        "
+    >
+        <!-- Campo para ingresar el nombre -->
+        <div
+            id="ui-layer"
+            style="
+                position: fixed;
+                top: 60%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: min(180vw, 2200px) !important;
+                z-index: 99999;
+                opacity: 0;
+                visibility: visible;
+                transition: opacity 0.5s ease;
+                pointer-events: auto;
+            "
+        >
+            <!--
+                No contiene botón.
+                El usuario continúa exclusivamente con Enter.
+            -->
+            <form
+                id="nombreForm"
+                autocomplete="off"
+                style="
+                    width: 100%;
+                    margin: 0;
+                    padding: 0;
+                "
+            >
+                <fieldset
+                    style="
+                        width: 100%;
+                        height: 88px;
+                        min-width: 0;
+                        margin: 0;
+                        padding: 0 40px;
+                        box-sizing: border-box;
+                        border: 2px solid #cccccc;
+                        border-radius: 2px;
+                        background-color: rgba(255, 255, 255, 0.08);
+                    "
+                >
+                    <legend
+                        style="
+                            margin-left: 8px;
+                            padding: 0 18px;
+                            color: #a7a7a7;
+                            font-family: Arial, Helvetica, sans-serif;
+                            font-size: 14px;
+                            font-weight: 600;
+                            letter-spacing: 1.8px;
+                            line-height: 1;
+                        "
+                    >
+                        INGRESA TU NOMBRE
+                    </legend>
+
+                    <input
+                        type="text"
+                        id="miInput"
+                        name="nombre"
+                        autocomplete="off"
+                        autocapitalize="words"
+                        spellcheck="false"
+                        inputmode="text"
+                        enterkeyhint="go"
+                        tabindex="0"
+                        aria-label="Ingresa tu nombre"
+                        style="
+                            display: block;
+                            width: 100%;
+                            height: 66px;
+                            margin: 0;
+                            padding: 0;
+                            box-sizing: border-box;
+                            border: none;
+                            outline: none;
+                            background: transparent;
+                            color: #000000;
+                            font-family: Arial, Helvetica, sans-serif;
+                            font-size: 28px;
+                            text-align: left;
+        	            font-weight: 400;
+        		    line-height: 66px;
+       			    text-align: left;
+                        "
+                    >
+                </fieldset>
+
+                <button
+                    type="submit"
+                    tabindex="-1"
+                    aria-hidden="true"
+                    style="
+                        position: absolute;
+                        width: 1px;
+                        height: 1px;
+                        padding: 0;
+                        margin: -1px;
+                        border: 0;
+                        opacity: 0;
+                        pointer-events: none;
+                        overflow: hidden;
+                    "
+                ></button>
+            </form>
+        </div>
+
+        <!-- Pantalla de carga de 3DVista -->
+        <div
+            id="preloadContainer"
+            class="fill-viewport"
+        >
+            <div
+                style="
+                    z-index: 4;
+                    position: absolute;
+                    overflow: hidden;
+                    left: 0%;
+                    top: 50%;
+                    width: 100%;
+                    height: 10%;
+                "
+            >
+                <div style="text-align: left; color: #000;">
+                    <div
+                        style="
+                            text-align: center;
+                            font-size: 1.6666666666666663vmin;
+                        "
+                    >
+                        <span
+                            style="
+                                display: inline-block;
+                                letter-spacing: 0vmin;
+                                white-space: pre-wrap;
+                                color: #777777;
+                                font-size: 1.67vmin;
+                                font-family: Arial, Helvetica, sans-serif;
+                            "
+                        >
+                            Loading virtual tour. Please wait...
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Visor de 3DVista -->
+        <div
+            id="viewer"
+            class="fill-viewport"
+        ></div>
+    </div>
+
+    <script>
+        (function () {
+            var params = new URLSearchParams(window.location.search);
+
+            var tabletIdParam = params.get('tablet_id');
+            if (tabletIdParam) {
+                localStorage.setItem('tablet_id', tabletIdParam);
+                console.log('tablet_id guardado desde URL:', tabletIdParam);
+            }
+
+            var screenParam = params.get('screen');
+            if (screenParam) {
+                localStorage.setItem('screen', screenParam);
+                console.log('screen guardado desde URL:', screenParam);
+            }
+
+            var roundIdParam = params.get('round_id');
+            if (roundIdParam) {
+                localStorage.setItem('round_id', roundIdParam);
+                console.log('round_id guardado desde URL:', roundIdParam);
+            }
+        })();
+
+
+
+        (function () {
+            'use strict';
+
+            var uiLayer =
+                document.getElementById('ui-layer');
+
+            var nombreForm =
+                document.getElementById('nombreForm');
+
+            var miInput =
+                document.getElementById('miInput');
+
+            var temporizadorFormulario = null;
+            var temporizadoresEnfoque = [];
+            var temporizadorProcesamiento = null;
+            var observadorPreloader = null;
+            var formularioNombreActivo = false;
+            var procesandoEntrada = false;
+            var operacionEntradaActual = 0;
+
+            window.KIDZANIA_API_TIMEOUT_MS = 8000;
+            window.KIDZANIA_INPUT_TIMEOUT_MS = 12000;
+
+            /*
+             * Muestra un aviso visible cuando la API no está disponible.
+             * El pequeño bloqueo evita alertas duplicadas si varias promesas
+             * fallan prácticamente al mismo tiempo.
+             */
+            var ultimaAlertaApi = 0;
+
+            window.mostrarAlertaConexionApi =
+                function (tipoOperacion) {
+                    var ahora = Date.now();
+
+                    if (
+                        ahora - ultimaAlertaApi < 2000
+                    ) {
+                        return;
+                    }
+
+                    ultimaAlertaApi = ahora;
+
+                    var mensaje =
+                        'No hay conexión con la API. ' +
+                        'Verifica que el servicio esté encendido ' +
+                        'y vuelve a intentarlo.';
+
+                    if (tipoOperacion === 'display') {
+                        mensaje =
+                            'No hay conexión con la API. ' +
+                            'La personalización no se envió al display. ' +
+                            'Verifica el servicio y vuelve a intentarlo.';
+                    } else if (tipoOperacion === 'cierre') {
+                        mensaje =
+                            'No hay conexión con la API. ' +
+                            'No fue posible cerrar la sesión en el servidor. ' +
+                            'Verifica el servicio y vuelve a intentarlo.';
+                    } else if (tipoOperacion === 'inicio') {
+                        mensaje =
+                            'No hay conexión con la API. ' +
+                            'No fue posible iniciar o recuperar la sesión. ' +
+                            'Verifica el servicio y vuelve a intentarlo.';
+                    }
+
+                    window.alert(mensaje);
+                };
+
+            /*
+             * ======================================================
+             * CONFIGURACIÓN GENERAL
+             * ======================================================
+             */
+
+            window.kidzaniaLogoClickStep = 0;
+            window.kidzaniaLogoResetTimer = null;
+            window.KIDZANIA_CODIGO_CIERRE = '1234';
+
+            window.kidzaniaConfig =
+                window.kidzaniaConfig || {
+                    tablet_id:
+                        localStorage.getItem('tablet_id') ||
+                        '00',
+
+                    screen:
+                        localStorage.getItem('screen') ||
+                        '00',
+
+                    round_id:
+                        localStorage.getItem('round_id') ||
+                        '20260709_001',
+
+                    user_name:
+                        localStorage.getItem('user_name') ||
+                        'invitado',
+
+                    line_id: '',
+                    product_type: '',
+                    product_id: '',
+
+                    personalization: [
+                        'var_color_blanco',
+                        'var_color_detalles_blanco',
+                        'var_emb_no',
+                        'var_texture_no'
+                    ]
+                };
+
+            /*
+             * ======================================================
+             * SESIÓN ACTIVA COMPARTIDA ENTRE TABLETS
+             * ======================================================
+             *
+             * Flujo:
+             * 1. Consulta GET /sessions.
+             * 2. Si existe una sesión active, reutiliza su id.
+             * 3. Solo si no existe, ejecuta POST /sessions.
+             * 4. Si el POST llega vacío porque otra tablet creó la
+             *    sesión al mismo tiempo, vuelve a consultar GET.
+             */
+
+            window.KIDZANIA_API_URL =
+                window.KIDZANIA_API_BASE;
+
+            /*
+             * Evita que una petición de la API quede pendiente para siempre.
+             * Se usa únicamente en las llamadas de KidZania del index y no
+             * modifica las solicitudes internas del reproductor de 3DVista.
+             */
+            window.kidzaniaFetchConTimeout =
+                function (
+                    recurso,
+                    opciones,
+                    tiempoLimite
+                ) {
+                    var limite =
+                        typeof tiempoLimite === 'number'
+                            ? tiempoLimite
+                            : window.KIDZANIA_API_TIMEOUT_MS;
+
+                    var opcionesFinales =
+                        Object.assign(
+                            {},
+                            opciones || {}
+                        );
+
+                    if (
+                        typeof window.AbortController ===
+                        'function'
+                    ) {
+                        var controlador =
+                            new window.AbortController();
+
+                        opcionesFinales.signal =
+                            controlador.signal;
+
+                        var temporizador =
+                            setTimeout(
+                                function () {
+                                    controlador.abort();
+                                },
+                                limite
+                            );
+
+                        return window
+                            .fetch(
+                                recurso,
+                                opcionesFinales
+                            )
+                            .catch(function (error) {
+                                if (
+                                    error &&
+                                    error.name ===
+                                        'AbortError'
+                                ) {
+                                    throw new Error(
+                                        'La API no respondió dentro del tiempo esperado.'
+                                    );
+                                }
+
+                                throw error;
+                            })
+                            .finally(function () {
+                                clearTimeout(
+                                    temporizador
+                                );
+                            });
+                    }
+
+                    /*
+                     * Respaldo para navegadores sin AbortController.
+                     */
+                    return new Promise(
+                        function (resolve, reject) {
+                            var finalizada = false;
+
+                            var temporizador =
+                                setTimeout(
+                                    function () {
+                                        if (finalizada) {
+                                            return;
+                                        }
+
+                                        finalizada = true;
+
+                                        reject(
+                                            new Error(
+                                                'La API no respondió dentro del tiempo esperado.'
+                                            )
+                                        );
+                                    },
+                                    limite
+                                );
+
+                            window
+                                .fetch(
+                                    recurso,
+                                    opcionesFinales
+                                )
+                                .then(function (response) {
+                                    if (finalizada) {
+                                        return;
+                                    }
+
+                                    finalizada = true;
+
+                                    clearTimeout(
+                                        temporizador
+                                    );
+
+                                    resolve(response);
+                                })
+                                .catch(function (error) {
+                                    if (finalizada) {
+                                        return;
+                                    }
+
+                                    finalizada = true;
+
+                                    clearTimeout(
+                                        temporizador
+                                    );
+
+                                    reject(error);
+                                });
+                        }
+                    );
+                };
+
+            window.kidzaniaSessionPromise = null;
+
+            window.aplicarSesionKidzania =
+                function (sesion) {
+                    if (!sesion || !sesion.id) {
+                        throw new Error(
+                            'La sesión recibida no contiene un ID.'
+                        );
+                    }
+
+                    localStorage.setItem(
+                        'session_id',
+                        sesion.id
+                    );
+
+                    window.kidzaniaConfig =
+                        window.kidzaniaConfig || {};
+
+                    window.kidzaniaConfig.session_id =
+                        sesion.id;
+
+                    console.log(
+                        'Sesión activa asignada:',
+                        sesion.id
+                    );
+
+                    return sesion;
+                };
+
+            window.buscarSesionActivaKidzania =
+                function () {
+                    return window
+                        .kidzaniaFetchConTimeout(
+                            window.KIDZANIA_API_URL +
+                                '/sessions',
+                            {
+                                method: 'GET',
+                                headers: {
+                                    'Accept':
+                                        'application/json'
+                                }
+                            },
+                            window.KIDZANIA_API_TIMEOUT_MS
+                        )
+                    .then(function (response) {
+                        if (!response.ok) {
+                            throw new Error(
+                                'Error consultando sesiones: ' +
+                                response.status
+                            );
+                        }
+
+                        return response.json();
+                    })
+                    .then(function (sesiones) {
+                        if (!Array.isArray(sesiones)) {
+                            return null;
+                        }
+
+                        var activas =
+                            sesiones.filter(
+                                function (sesion) {
+                                    return (
+                                        sesion &&
+                                        String(
+                                            sesion.status || ''
+                                        ).toLowerCase() ===
+                                            'active'
+                                    );
+                                }
+                            );
+
+                        if (!activas.length) {
+                            return null;
+                        }
+
+                        if (activas.length > 1) {
+                            console.warn(
+                                'Se encontraron varias sesiones activas:',
+                                activas
+                            );
+                        }
+
+                        /*
+                         * Si por una condición de carrera hubiera
+                         * varias activas, usa la más reciente.
+                         */
+                        activas.sort(
+                            function (a, b) {
+                                var fechaA =
+                                    new Date(
+                                        a.session_start || 0
+                                    ).getTime() || 0;
+
+                                var fechaB =
+                                    new Date(
+                                        b.session_start || 0
+                                    ).getTime() || 0;
+
+                                return fechaB - fechaA;
+                            }
+                        );
+
+                        return activas[0];
+                    });
+                };
+
+            window.leerRespuestaSeguraKidzania =
+                function (response) {
+                    if (!response.ok) {
+                        throw new Error(
+                            'Error HTTP: ' +
+                            response.status
+                        );
+                    }
+
+                    return response.text()
+                        .then(function (texto) {
+                            if (
+                                !texto ||
+                                !texto.trim()
+                            ) {
+                                return null;
+                            }
+
+                            try {
+                                return JSON.parse(texto);
+                            } catch (error) {
+                                console.warn(
+                                    'La respuesta no contiene JSON válido:',
+                                    texto
+                                );
+
+                                return null;
+                            }
+                        });
+                };
+
+            window.obtenerOCrearSesionActivaKidzania =
+                function () {
+                    if (
+                        window.kidzaniaSessionPromise
+                    ) {
+                        return window
+                            .kidzaniaSessionPromise;
+                    }
+
+                    window.kidzaniaSessionPromise =
+                        window
+                            .buscarSesionActivaKidzania()
+                            .then(
+                                function (sesionActiva) {
+                                    if (sesionActiva) {
+                                        console.log(
+                                            'Ya existe una sesión activa. ' +
+                                            'Se reutilizará sin hacer POST.'
+                                        );
+
+                                        return sesionActiva;
+                                    }
+
+                                    console.log(
+                                        'No existe sesión activa. ' +
+                                        'Solicitando una nueva.'
+                                    );
+
+                                    return window
+                                        .kidzaniaFetchConTimeout(
+                                            window.KIDZANIA_API_URL +
+                                                '/sessions',
+                                            {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Accept':
+                                                        'application/json',
+                                                    'Content-Type':
+                                                        'application/json'
+                                                }
+                                            },
+                                            window.KIDZANIA_API_TIMEOUT_MS
+                                        )
+                                    .then(
+                                        window
+                                            .leerRespuestaSeguraKidzania
+                                    )
+                                    .then(
+                                        function (sesionCreada) {
+                                            if (
+                                                sesionCreada &&
+                                                sesionCreada.id
+                                            ) {
+                                                return sesionCreada;
+                                            }
+
+                                            /*
+                                             * El backend devuelve vacío cuando
+                                             * otra tablet ya creó una sesión.
+                                             * Espera un instante y consulta de
+                                             * nuevo la sesión activa.
+                                             */
+                                            return new Promise(
+                                                function (resolve) {
+                                                    setTimeout(
+                                                        resolve,
+                                                        300
+                                                    );
+                                                }
+                                            )
+                                            .then(function () {
+                                                return window
+                                                    .buscarSesionActivaKidzania();
+                                            });
+                                        }
+                                    );
+                                }
+                            )
+                            .then(function (sesion) {
+                                if (
+                                    !sesion ||
+                                    !sesion.id
+                                ) {
+                                    throw new Error(
+                                        'No fue posible obtener una sesión activa.'
+                                    );
+                                }
+
+                                return window
+                                    .aplicarSesionKidzania(
+                                        sesion
+                                    );
+                            })
+                            .finally(function () {
+                                window.kidzaniaSessionPromise =
+                                    null;
+                            });
+
+                    return window
+                        .kidzaniaSessionPromise;
+                };
+
+            /*
+             * ======================================================
+             * OBTENCIÓN DEL REPRODUCTOR DE 3DVISTA
+             * ======================================================
+             */
+
+            function esPlayerValido(player) {
+                return (
+                    player &&
+                    typeof player.getComponentByName ===
+                        'function'
+                );
+            }
+
+            function resolverPlayer(candidato) {
+                var player = null;
+
+                /*
+                 * Cuando la función es llamada desde
+                 * Execute JavaScript de 3DVista,
+                 * "this" normalmente es el player.
+                 */
+                if (esPlayerValido(candidato)) {
+                    player = candidato;
+                }
+
+                /*
+                 * Player almacenado anteriormente.
+                 */
+                if (
+                    !player &&
+                    esPlayerValido(window.tourPlayer)
+                ) {
+                    player = window.tourPlayer;
+                }
+
+                /*
+                 * Forma común en proyectos publicados
+                 * por 3DVista.
+                 */
+                if (
+                    !player &&
+                    window.tour &&
+                    typeof window.tour._getRootPlayer ===
+                        'function'
+                ) {
+                    try {
+                        player =
+                            window.tour._getRootPlayer();
+                    } catch (error) {
+                        console.warn(
+                            'No se pudo obtener rootPlayer:',
+                            error
+                        );
+                    }
+                }
+
+                /*
+                 * Respaldo mediante tour.player.
+                 */
+                if (
+                    !player &&
+                    window.tour &&
+                    window.tour.player &&
+                    typeof window.tour.player.getById ===
+                        'function'
+                ) {
+                    try {
+                        player =
+                            window.tour.player.getById(
+                                'rootPlayer'
+                            );
+                    } catch (error) {
+                        console.warn(
+                            'No se pudo obtener rootPlayer por ID:',
+                            error
+                        );
+                    }
+                }
+
+                /*
+                 * Otros respaldos posibles.
+                 */
+                if (
+                    !player &&
+                    esPlayerValido(window.rootPlayer)
+                ) {
+                    player = window.rootPlayer;
+                }
+
+                if (
+                    !player &&
+                    esPlayerValido(window.player)
+                ) {
+                    player = window.player;
+                }
+
+                if (esPlayerValido(player)) {
+                    window.tourPlayer = player;
+                    return player;
+                }
+
+                return null;
+            }
+
+            /*
+             * Espera a que 3DVista haya terminado de cargar.
+             */
+            function ejecutarConPlayer(
+                candidato,
+                alEncontrar,
+                alFallar,
+                intentos
+            ) {
+                var player =
+                    resolverPlayer(candidato);
+
+                intentos =
+                    typeof intentos === 'number'
+                        ? intentos
+                        : 30;
+
+                if (player) {
+                    alEncontrar(player);
+                    return;
+                }
+
+                if (intentos <= 0) {
+                    console.error(
+                        'No se pudo obtener el reproductor de 3DVista.'
+                    );
+
+                    if (
+                        typeof alFallar === 'function'
+                    ) {
+                        alFallar();
+                    }
+
+                    return;
+                }
+
+                setTimeout(function () {
+                    ejecutarConPlayer(
+                        candidato,
+                        alEncontrar,
+                        alFallar,
+                        intentos - 1
+                    );
+                }, 100);
+            }
+
+            /*
+             * ======================================================
+             * COMPONENTES DEL SKIN
+             * ======================================================
+             */
+
+            function obtenerComponente(
+                player,
+                nombre
+            ) {
+                if (!esPlayerValido(player)) {
+                    return null;
+                }
+
+                /*
+                 * En el proyecto existen varios componentes
+                 * que podrían llamarse "back".
+                 *
+                 * Este es el fondo general que cubre el modelo.
+                 */
+                if (
+                    nombre === 'back' &&
+                    player
+                        .Image_5368D668_43D6_E721_41A4_B79E13E595A4
+                ) {
+                    return player
+                        .Image_5368D668_43D6_E721_41A4_B79E13E595A4;
+                }
+
+                try {
+                    return player.getComponentByName(
+                        nombre
+                    );
+                } catch (error) {
+                    console.warn(
+                        'No se pudo obtener el componente:',
+                        nombre,
+                        error
+                    );
+
+                    return null;
+                }
+            }
+
+            function cambiarVisibilidad(
+                player,
+                nombre,
+                visible
+            ) {
+                var componente =
+                    obtenerComponente(
+                        player,
+                        nombre
+                    );
+
+                if (
+                    componente &&
+                    typeof componente.set === 'function'
+                ) {
+                    componente.set(
+                        'visible',
+                        visible
+                    );
+
+                    return true;
+                }
+
+                console.warn(
+                    'No se encontró el componente:',
+                    nombre
+                );
+
+                return false;
+            }
+
+            function leerVisibilidad(
+                player,
+                nombre
+            ) {
+                var componente =
+                    obtenerComponente(
+                        player,
+                        nombre
+                    );
+
+                if (
+                    componente &&
+                    typeof componente.get === 'function'
+                ) {
+                    return componente.get(
+                        'visible'
+                    );
+                }
+
+                return undefined;
+            }
+
+            /*
+             * Repite los cambios después de que terminen
+             * las acciones y efectos de 3DVista.
+             */
+            function aplicarDespuesDe3DVista(
+                funcion
+            ) {
+                funcion();
+
+                setTimeout(funcion, 0);
+                setTimeout(funcion, 80);
+                setTimeout(funcion, 200);
+                setTimeout(funcion, 450);
+                setTimeout(funcion, 850);
+            }
+
+            /*
+             * ======================================================
+             * LOGOS KIDZANIA
+             * ======================================================
+             */
+
+            function reiniciarSecuenciaLogos(
+                player
+            ) {
+                /*
+                 * Cancela cualquier temporizador pendiente.
+                 */
+                if (window.kidzaniaLogoResetTimer) {
+                    clearTimeout(
+                        window.kidzaniaLogoResetTimer
+                    );
+
+                    window.kidzaniaLogoResetTimer = null;
+                }
+
+                /*
+                 * Reinicia la cuenta de presiones.
+                 */
+                window.kidzaniaLogoClickStep = 0;
+
+                aplicarDespuesDe3DVista(
+                    function () {
+                        cambiarVisibilidad(
+                            player,
+                            'logo_kidzania_1',
+                            true
+                        );
+
+                        cambiarVisibilidad(
+                            player,
+                            'logo_kidzania_2',
+                            false
+                        );
+
+                        cambiarVisibilidad(
+                            player,
+                            'logo_kidzania_3',
+                            false
+                        );
+                    }
+                );
+
+                console.log(
+                    'Secuencia KidZania reiniciada. ' +
+                    'Deben repetirse los tres clics.'
+                );
+            }
+
+            /*
+             * Inicia un limite de 20 segundos desde el primer toque.
+             * Si no se completa la secuencia, vuelve al primer logo.
+             */
+            window.iniciarTemporizadorLogosKidzania =
+                function (candidato) {
+                    ejecutarConPlayer(
+                        candidato,
+
+                        function (player) {
+                            if (
+                                window.kidzaniaLogoResetTimer
+                            ) {
+                                clearTimeout(
+                                    window.kidzaniaLogoResetTimer
+                                );
+                            }
+
+                            window.kidzaniaLogoResetTimer =
+                                setTimeout(
+                                    function () {
+                                        console.warn(
+                                            'Pasaron 10 segundos sin ' +
+                                            'completar los tres toques. ' +
+                                            'La secuencia se reiniciara.'
+                                        );
+
+                                        reiniciarSecuenciaLogos(
+                                            player
+                                        );
+                                    },
+                                    10000
+                                );
+
+                            console.log(
+                                'Temporizador KidZania iniciado: ' +
+                                '10 segundos para completar la secuencia.'
+                            );
+                        }
+                    );
+                };
+
+            /*
+             * Guarda la pantalla que está abierta antes
+             * de solicitar el código.
+             */
+            function capturarPantallaActual(
+                player
+            ) {
+                var nombres = [
+                    'Main Viewer',
+                    'back',
+                    'Bienvenida',
+                    'Categorias',
+                    'Container_moda',
+                    'Container_deporte',
+                    'moda_3d',
+                    'deporte_3d',
+                    'Despedida'
+                ];
+
+                var estado = {};
+
+                nombres.forEach(
+                    function (nombre) {
+                        estado[nombre] =
+                            leerVisibilidad(
+                                player,
+                                nombre
+                            );
+                    }
+                );
+
+                return estado;
+            }
+
+            /*
+             * Código incorrecto:
+             * restaura exactamente la pantalla anterior.
+             */
+            function restaurarPantallaAnterior(
+                player,
+                estado
+            ) {
+                aplicarDespuesDe3DVista(
+                    function () {
+                        Object.keys(
+                            estado
+                        ).forEach(
+                            function (nombre) {
+                                if (
+                                    typeof estado[nombre] ===
+                                    'boolean'
+                                ) {
+                                    cambiarVisibilidad(
+                                        player,
+                                        nombre,
+                                        estado[nombre]
+                                    );
+                                }
+                            }
+                        );
+                    }
+                );
+            }
+
+            /*
+             * Código correcto:
+             * regresa a la pantalla de bienvenida.
+             *
+             * Las tarjetas de categorías quedan preparadas
+             * para la siguiente sesión.
+             */
+            function prepararBienvenida(
+                player
+            ) {
+                aplicarDespuesDe3DVista(
+                    function () {
+                        cambiarVisibilidad(
+                            player,
+                            'Despedida',
+                            false
+                        );
+
+                        cambiarVisibilidad(
+                            player,
+                            'Categorias',
+                            false
+                        );
+
+                        cambiarVisibilidad(
+                            player,
+                            'moda_3d',
+                            false
+                        );
+
+                        cambiarVisibilidad(
+                            player,
+                            'deporte_3d',
+                            false
+                        );
+
+                        /*
+                         * Prepara las tarjetas para la
+                         * siguiente entrada.
+                         */
+                        cambiarVisibilidad(
+                            player,
+                            'Container_moda',
+                            true
+                        );
+
+                        cambiarVisibilidad(
+                            player,
+                            'Container_deporte',
+                            true
+                        );
+
+                        /*
+                         * Cubre el modelo anterior.
+                         */
+                        cambiarVisibilidad(
+                            player,
+                            'back',
+                            true
+                        );
+
+                        cambiarVisibilidad(
+                            player,
+                            'Bienvenida',
+                            true
+                        );
+                    }
+                );
+            }
+
+            /*
+             * Esta función se ejecuta exclusivamente
+             * desde logo_kidzania_3.
+             */
+            window.cerrarSesionKidzania =
+                function (candidato) {
+                    ejecutarConPlayer(
+                        candidato,
+
+                        function (player) {
+                            if (
+                                window
+                                    .kidzaniaLogoClickStep !==
+                                2
+                            ) {
+                                console.warn(
+                                    'No se completó la secuencia ' +
+                                    'de tres presiones.'
+                                );
+
+                                reiniciarSecuenciaLogos(
+                                    player
+                                );
+
+                                return;
+                            }
+
+                            /*
+                             * La tercera presion se completo a tiempo.
+                             * Detiene el limite de 20 segundos antes
+                             * de mostrar la solicitud del codigo.
+                             */
+                            if (window.kidzaniaLogoResetTimer) {
+                                clearTimeout(
+                                    window.kidzaniaLogoResetTimer
+                                );
+
+                                window.kidzaniaLogoResetTimer = null;
+                            }
+
+                            /*
+                             * Captura la pantalla antes
+                             * de abrir el prompt.
+                             */
+                            var estadoAntesDelCodigo =
+                                capturarPantallaActual(
+                                    player
+                                );
+
+                            var codigoIngresado =
+                                window.prompt(
+                                    'Ingresa el código de ' +
+                                    'autorización para cerrar sesión:'
+                                );
+
+                            var codigoValido =
+                                codigoIngresado !== null &&
+                                codigoIngresado
+                                    .trim()
+                                    .toLowerCase() ===
+                                    window
+                                        .KIDZANIA_CODIGO_CIERRE
+                                        .toLowerCase();
+
+                            /*
+                             * ==================================
+                             * CÓDIGO INCORRECTO O CANCELAR
+                             * ==================================
+                             *
+                             * No cambia de pantalla.
+                             * No muestra Bienvenida.
+                             * No cierra la sesión.
+                             * No limpia la configuración.
+                             * Solo reinicia los tres logos.
+                             */
+                            if (!codigoValido) {
+                                console.warn(
+                                    'Código incorrecto o cancelado. ' +
+                                    'La sesión permanece abierta.'
+                                );
+
+                                restaurarPantallaAnterior(
+                                    player,
+                                    estadoAntesDelCodigo
+                                );
+
+                                reiniciarSecuenciaLogos(
+                                    player
+                                );
+
+                                return;
+                            }
+
+                            /*
+                             * ==================================
+                             * CÓDIGO CORRECTO
+                             * ==================================
+                             */
+
+                            console.log(
+                                'Código correcto. Cerrando sesión.'
+                            );
+
+                            reiniciarSecuenciaLogos(
+                                player
+                            );
+
+                            localStorage.removeItem(
+                                'user_name'
+                            );
+
+                            miInput.value = '';
+
+                            window.kidzaniaConfig = {
+                                tablet_id:
+                                    localStorage.getItem(
+                                        'tablet_id'
+                                    ) || '00',
+
+                                screen:
+                                    localStorage.getItem(
+                                        'screen'
+                                    ) || '00',
+
+                                round_id:
+                                    localStorage.getItem(
+                                        'round_id'
+                                    ) ||
+                                    '20260709_001',
+
+                                user_name: 'invitado',
+                                line_id: '',
+                                product_type: '',
+                                product_id: '',
+
+                                personalization: [
+                                    'var_color_blanco',
+                                    'var_color_detalles_blanco',
+                                    'var_emb_no',
+                                    'var_texture_no'
+                                ]
+                            };
+
+                            prepararBienvenida(
+                                player
+                            );
+
+                            setTimeout(
+                                function () {
+                                    window
+                                        .mostrarFormularioNombre(
+                                            true
+                                        );
+                                },
+                                300
+                            );
+
+                            /*
+                             * Cierre en el backend.
+                             */
+                            window
+                                .kidzaniaFetchConTimeout(
+                                    window.kidzaniaApi('/sessions/close'),
+                                    {
+                                        method: 'POST',
+
+                                        headers: {
+                                            'Content-Type':
+                                                'application/json'
+                                        }
+                                    },
+                                    window.KIDZANIA_API_TIMEOUT_MS
+                                )
+                            .then(function (res) {
+                                if (!res.ok) {
+                                    throw new Error(
+                                        'Error HTTP: ' +
+                                        res.status
+                                    );
+                                }
+
+                                return res
+                                    .text()
+                                    .then(
+                                        function (texto) {
+                                            if (!texto) {
+                                                return {};
+                                            }
+
+                                            try {
+                                                return JSON.parse(
+                                                    texto
+                                                );
+                                            } catch (
+                                                error
+                                            ) {
+                                                return {
+                                                    response:
+                                                        texto
+                                                };
+                                            }
+                                        }
+                                    );
+                            })
+                            .then(function (data) {
+                                console.log(
+                                    'Sesión cerrada:',
+                                    data
+                                );
+                            })
+                            .catch(function (error) {
+                                console.error(
+                                    'Error al cerrar sesión:',
+                                    error
+                                );
+
+                                window
+                                    .mostrarAlertaConexionApi(
+                                        'cierre'
+                                    );
+                            });
+                        }
+                    );
+                };
+
+            /*
+             * ======================================================
+             * PANTALLA DE CATEGORÍAS
+             * ======================================================
+             */
+
+            window.kidzaniaEntrarACategorias =
+                function (candidato) {
+                    var player =
+                        resolverPlayer(candidato);
+
+                    if (!player) {
+                        console.error(
+                            'No se pudo obtener el reproductor ' +
+                            'para abrir Categorías.'
+                        );
+
+                        return false;
+                    }
+
+                    aplicarDespuesDe3DVista(
+                        function () {
+                            cambiarVisibilidad(
+                                player,
+                                'Bienvenida',
+                                false
+                            );
+
+                            cambiarVisibilidad(
+                                player,
+                                'Despedida',
+                                false
+                            );
+
+                            /*
+                             * Oculta los contenedores 3D
+                             * de la sesión anterior.
+                             */
+                            cambiarVisibilidad(
+                                player,
+                                'moda_3d',
+                                false
+                            );
+
+                            cambiarVisibilidad(
+                                player,
+                                'deporte_3d',
+                                false
+                            );
+
+                            /*
+                             * Cubre cualquier modelo que
+                             * siga cargado en Main Viewer.
+                             */
+                            cambiarVisibilidad(
+                                player,
+                                'back',
+                                true
+                            );
+
+                            /*
+                             * Reactiva expresamente las
+                             * tarjetas de Moda y Deporte.
+                             */
+                            cambiarVisibilidad(
+                                player,
+                                'Container_moda',
+                                true
+                            );
+
+                            cambiarVisibilidad(
+                                player,
+                                'Container_deporte',
+                                true
+                            );
+
+                            cambiarVisibilidad(
+                                player,
+                                'Categorias',
+                                true
+                            );
+                        }
+                    );
+
+                    return true;
+                };
+
+            /*
+             * ======================================================
+             * FORMULARIO DEL NOMBRE
+             * ======================================================
+             */
+
+            function formularioNombreVisible() {
+                return (
+                    formularioNombreActivo &&
+                    uiLayer.style.display !== 'none' &&
+                    uiLayer.style.visibility !== 'hidden' &&
+                    uiLayer.style.pointerEvents !== 'none'
+                );
+            }
+
+            function cancelarEnfoquesPendientes() {
+                temporizadoresEnfoque.forEach(
+                    function (temporizador) {
+                        clearTimeout(temporizador);
+                    }
+                );
+
+                temporizadoresEnfoque = [];
+            }
+
+            function enfocarInputNombre() {
+                if (!formularioNombreVisible()) {
+                    return;
+                }
+
+                /*
+                 * Ninguna ruta del flujo debe dejar el campo deshabilitado.
+                 */
+                miInput.disabled = false;
+                miInput.readOnly = false;
+                miInput.setAttribute(
+                    'aria-disabled',
+                    'false'
+                );
+
+                try {
+                    miInput.focus({
+                        preventScroll: true
+                    });
+                } catch (error) {
+                    miInput.focus();
+                }
+            }
+
+            function programarEnfoqueInput() {
+                cancelarEnfoquesPendientes();
+
+                [0, 80, 250, 600, 1200, 2500]
+                    .forEach(
+                        function (retraso) {
+                            temporizadoresEnfoque.push(
+                                setTimeout(
+                                    enfocarInputNombre,
+                                    retraso
+                                )
+                            );
+                        }
+                    );
+            }
+
+            function limpiarEstadoProcesamiento() {
+                clearTimeout(
+                    temporizadorProcesamiento
+                );
+
+                temporizadorProcesamiento = null;
+                procesandoEntrada = false;
+
+                nombreForm.removeAttribute(
+                    'aria-busy'
+                );
+            }
+
+            function invalidarProcesamientoActual() {
+                operacionEntradaActual += 1;
+                limpiarEstadoProcesamiento();
+            }
+
+            function finalizarProcesamiento(
+                idOperacion
+            ) {
+                if (
+                    idOperacion !==
+                    operacionEntradaActual
+                ) {
+                    return false;
+                }
+
+                limpiarEstadoProcesamiento();
+                return true;
+            }
+
+            window.mostrarFormularioNombre =
+                function (limpiarInput) {
+                    clearTimeout(
+                        temporizadorFormulario
+                    );
+
+                    var yaEstabaActivo =
+                        formularioNombreActivo;
+
+                    formularioNombreActivo = true;
+
+                    uiLayer.style.display =
+                        'block';
+
+                    uiLayer.style.visibility =
+                        'visible';
+
+                    uiLayer.style.pointerEvents =
+                        'auto';
+
+                    uiLayer.style.zIndex =
+                        '2147483647';
+
+                    /*
+                     * Bienvenida puede solicitar el formulario más de una vez:
+                     * desde el index y desde la acción Show de 3DVista. Si ya
+                     * está activo, no vuelve a limpiar el texto ni cancela una
+                     * solicitud que el usuario ya inició.
+                     */
+                    if (yaEstabaActivo) {
+                        uiLayer.style.opacity =
+                            '1';
+
+                        programarEnfoqueInput();
+                        return;
+                    }
+
+                    /*
+                     * Al volver realmente a Bienvenida se elimina cualquier
+                     * bloqueo anterior y se invalidan respuestas tardías.
+                     */
+                    invalidarProcesamientoActual();
+
+                    if (limpiarInput !== false) {
+                        miInput.value = '';
+                    }
+
+                    uiLayer.style.opacity =
+                        '0';
+
+                    requestAnimationFrame(
+                        function () {
+                            requestAnimationFrame(
+                                function () {
+                                    uiLayer.style.opacity =
+                                        '1';
+                                }
+                            );
+                        }
+                    );
+
+                    programarEnfoqueInput();
+                };
+
+            window.ocultarFormularioNombre =
+                function () {
+                    clearTimeout(
+                        temporizadorFormulario
+                    );
+
+                    formularioNombreActivo = false;
+                    cancelarEnfoquesPendientes();
+
+                    uiLayer.style.opacity =
+                        '0';
+
+                    uiLayer.style.pointerEvents =
+                        'none';
+
+                    temporizadorFormulario =
+                        setTimeout(
+                            function () {
+                                uiLayer.style.visibility =
+                                    'hidden';
+
+                                uiLayer.style.display =
+                                    'none';
+                            },
+                            500
+                        );
+                };
+
+            window.validarNombreKidzania =
+                function (nombreOriginal) {
+                    var nombre =
+                        String(nombreOriginal || '')
+                            .trim()
+                            .replace(/\s+/g, ' ');
+
+                    if (!nombre) {
+                        return {
+                            valido: false,
+                            mensaje:
+                                'Ingresa tu nombre.'
+                        };
+                    }
+
+                    if (/\d/.test(nombre)) {
+                        return {
+                            valido: false,
+                            mensaje:
+                                'El nombre no puede contener números.'
+                        };
+                    }
+
+                    if (
+                        /[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/
+                            .test(nombre)
+                    ) {
+                        return {
+                            valido: false,
+                            mensaje:
+                                'El nombre solo puede contener letras y espacios. No uses símbolos.'
+                        };
+                    }
+
+                    var cantidadLetras =
+                        nombre.replace(/\s/g, '').length;
+
+                    if (cantidadLetras < 3) {
+                        return {
+                            valido: false,
+                            mensaje:
+                                'El nombre debe contener al menos 3 letras.'
+                        };
+                    }
+
+                    return {
+                        valido: true,
+                        nombre: nombre,
+                        mensaje: ''
+                    };
+                };
+
+            window.esNombreValido =
+                function (nombre) {
+                    return window
+                        .validarNombreKidzania(nombre)
+                        .valido;
+                };
+
+            window.guardarNombre =
+                function () {
+                    var resultado =
+                        window.validarNombreKidzania(
+                            miInput.value
+                        );
+
+                    if (!resultado.valido) {
+                        console.warn(
+                            'Nombre inválido:',
+                            resultado.mensaje
+                        );
+
+                        window.alert(
+                            resultado.mensaje
+                        );
+
+                        programarEnfoqueInput();
+                        return false;
+                    }
+
+                    miInput.value =
+                        resultado.nombre;
+
+                    localStorage.setItem(
+                        'user_name',
+                        resultado.nombre
+                    );
+
+                    window.kidzaniaConfig =
+                        window.kidzaniaConfig || {};
+
+                    window.kidzaniaConfig.user_name =
+                        resultado.nombre;
+
+                    console.log(
+                        'Nombre guardado:',
+                        resultado.nombre
+                    );
+
+                    return true;
+                };
+
+            /*
+             * ======================================================
+             * CONTINUAR DESDE BIENVENIDA
+             * ======================================================
+             *
+             * La validación del nombre SI bloquea el avance.
+             * La disponibilidad de la API NO bloquea el avance:
+             * se intenta preparar/recuperar la sesión en segundo plano
+             * y, si falla, únicamente se muestra el alert correspondiente.
+             *
+             * Esta misma función se usa tanto con Enter como desde el
+             * botón CONTINUAR de 3DVista.
+             */
+            window.procesarNombreKidzania =
+                function (candidatoPlayer, event) {
+                    if (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }
+
+                    if (procesandoEntrada) {
+                        return false;
+                    }
+
+                    /*
+                     * Los errores de nombre sí son stopper:
+                     * vacío, números, símbolos o menos de 3 letras.
+                     */
+                    if (!window.guardarNombre()) {
+                        return false;
+                    }
+
+                    procesandoEntrada = true;
+                    nombreForm.setAttribute(
+                        'aria-busy',
+                        'true'
+                    );
+
+                    var idOperacion =
+                        ++operacionEntradaActual;
+
+                    /*
+                     * Primero continúa la experiencia. No esperamos a la API.
+                     */
+                    ejecutarConPlayer(
+                        candidatoPlayer || null,
+
+                        function (player) {
+                            if (
+                                idOperacion !==
+                                operacionEntradaActual
+                            ) {
+                                return;
+                            }
+
+                            window
+                                .ocultarFormularioNombre();
+
+                            window
+                                .kidzaniaEntrarACategorias(
+                                    player
+                                );
+
+                            finalizarProcesamiento(
+                                idOperacion
+                            );
+                        },
+
+                        function () {
+                            if (
+                                !finalizarProcesamiento(
+                                    idOperacion
+                                )
+                            ) {
+                                return;
+                            }
+
+                            window.alert(
+                                'No se pudo abrir la pantalla de categorías. Vuelve a intentarlo.'
+                            );
+
+                            window
+                                .mostrarFormularioNombre(
+                                    false
+                                );
+                        }
+                    );
+
+                    /*
+                     * La sesión se prepara en segundo plano.
+                     * Si la API está caída, el interceptor global y este
+                     * catch muestran el aviso, pero NO regresan a Bienvenida
+                     * ni impiden seguir navegando.
+                     */
+                    if (
+                        typeof window
+                            .obtenerOCrearSesionActivaKidzania ===
+                        'function'
+                    ) {
+                        window
+                            .obtenerOCrearSesionActivaKidzania()
+                            .then(function (sesion) {
+                                console.log(
+                                    'Sesión preparada en segundo plano:',
+                                    sesion && sesion.id
+                                );
+                            })
+                            .catch(function (error) {
+                                console.error(
+                                    'No se pudo preparar la sesión. ' +
+                                    'La experiencia continuará sin conexión:',
+                                    error
+                                );
+
+                                window.kidzaniaSessionPromise =
+                                    null;
+
+                                if (
+                                    typeof window
+                                        .mostrarAlertaConexionApi ===
+                                    'function'
+                                ) {
+                                    window
+                                        .mostrarAlertaConexionApi(
+                                            'inicio'
+                                        );
+                                }
+                            });
+                    } else {
+                        console.warn(
+                            'No existe obtenerOCrearSesionActivaKidzania(). ' +
+                            'La experiencia continuará sin sesión de API.'
+                        );
+                    }
+
+                    return false;
+                };
+
+            /*
+             * Enter físico. El submit de abajo cubre también Go/Done
+             * de los teclados virtuales.
+             */
+            miInput.addEventListener(
+                'keydown',
+                function (event) {
+                    event.stopPropagation();
+
+                    if (
+                        event.key !== 'Enter' ||
+                        event.repeat
+                    ) {
+                        return;
+                    }
+
+                    window.procesarNombreKidzania(
+                        null,
+                        event
+                    );
+                }
+            );
+
+            nombreForm.addEventListener(
+                'submit',
+                function (event) {
+                    window.procesarNombreKidzania(
+                        null,
+                        event
+                    );
+                }
+            );
+
+            /*
+             * Evita que los eventos del formulario lleguen al visor.
+             * No se usa preventDefault para conservar escritura, selección
+             * y apertura del teclado virtual.
+             */
+            [
+                'pointerdown',
+                'pointerup',
+                'mousedown',
+                'mouseup',
+                'touchstart',
+                'touchend',
+                'click',
+                'dblclick',
+                'keyup',
+                'keypress'
+            ].forEach(
+                function (nombreEvento) {
+                    nombreForm.addEventListener(
+                        nombreEvento,
+                        function (event) {
+                            event.stopPropagation();
+                        }
+                    );
+                }
+            );
+
+            /*
+             * Un toque sobre cualquier parte del recuadro devuelve el foco
+             * al campo, útil si 3DVista lo tomó durante una transición.
+             */
+            uiLayer.addEventListener(
+                'pointerdown',
+                function () {
+                    setTimeout(
+                        enfocarInputNombre,
+                        0
+                    );
+                }
+            );
+
+            uiLayer.addEventListener(
+                'touchend',
+                function () {
+                    setTimeout(
+                        enfocarInputNombre,
+                        0
+                    );
+                }
+            );
+
+            window.addEventListener(
+                'focus',
+                function () {
+                    if (formularioNombreVisible()) {
+                        programarEnfoqueInput();
+                    }
+                }
+            );
+
+            document.addEventListener(
+                'visibilitychange',
+                function () {
+                    if (
+                        document.visibilityState ===
+                            'visible' &&
+                        formularioNombreVisible()
+                    ) {
+                        programarEnfoqueInput();
+                    }
+                }
+            );
+
+            /*
+             * Cuando termina el preloader de 3DVista, recupera el foco.
+             */
+            var preloadContainer =
+                document.getElementById(
+                    'preloadContainer'
+                );
+
+            if (
+                preloadContainer &&
+                typeof window.MutationObserver ===
+                    'function'
+            ) {
+                observadorPreloader =
+                    new window.MutationObserver(
+                        function () {
+                            if (
+                                preloadContainer.style.display ===
+                                    'none' ||
+                                preloadContainer.style.visibility ===
+                                    'hidden'
+                            ) {
+                                if (formularioNombreVisible()) {
+                                    programarEnfoqueInput();
+                                }
+                            }
+                        }
+                    );
+
+                observadorPreloader.observe(
+                    preloadContainer,
+                    {
+                        attributes: true,
+                        attributeFilter: [
+                            'style'
+                        ]
+                    }
+                );
+            }
+
+            /*
+             * ======================================================
+             * RESPALDO DE RETORNO A BIENVENIDA
+             * ======================================================
+             *
+             * Algunas acciones de 3DVista vuelven a mostrar el
+             * contenedor Bienvenida sin ejecutar correctamente su
+             * JavaScript de evento Show. Este monitor detecta el
+             * cambio de oculto a visible y recupera el formulario.
+             */
+            var monitorBienvenidaKidzania = null;
+            var bienvenidaVisibleAnterior = null;
+
+            function iniciarMonitorBienvenidaKidzania() {
+                if (monitorBienvenidaKidzania) {
+                    return;
+                }
+
+                monitorBienvenidaKidzania =
+                    setInterval(
+                        function () {
+                            var player =
+                                resolverPlayer(null);
+
+                            if (!player) {
+                                return;
+                            }
+
+                            var bienvenidaVisible =
+                                leerVisibilidad(
+                                    player,
+                                    'Bienvenida'
+                                ) === true;
+
+                            /*
+                             * Primera lectura: conserva el estado. El
+                             * setTimeout inicial de abajo se encarga de
+                             * mostrar el formulario al abrir la página.
+                             */
+                            if (
+                                bienvenidaVisibleAnterior ===
+                                null
+                            ) {
+                                bienvenidaVisibleAnterior =
+                                    bienvenidaVisible;
+                                return;
+                            }
+
+                            /*
+                             * Se regresó desde Despedida a Bienvenida.
+                             */
+                            if (
+                                bienvenidaVisible &&
+                                bienvenidaVisibleAnterior ===
+                                    false
+                            ) {
+                                window
+                                    .mostrarFormularioNombre(
+                                        true
+                                    );
+                            }
+
+                            /*
+                             * Si 3DVista cambia de pantalla por su
+                             * cuenta, evita que el input quede encima.
+                             */
+                            if (
+                                !bienvenidaVisible &&
+                                bienvenidaVisibleAnterior ===
+                                    true &&
+                                formularioNombreActivo
+                            ) {
+                                window
+                                    .ocultarFormularioNombre();
+                            }
+
+                            bienvenidaVisibleAnterior =
+                                bienvenidaVisible;
+                        },
+                        200
+                    );
+            }
+
+            iniciarMonitorBienvenidaKidzania();
+
+            /*
+             * Aparición inicial del formulario.
+             */
+            setTimeout(
+                function () {
+                    window
+                        .mostrarFormularioNombre(
+                            true
+                        );
+                },
+                650
+            );
+        })();
+    </script>
+</body>
+</html> 

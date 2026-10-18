@@ -1,0 +1,2 @@
+# Modelos 3D: usar Git LFS (cada .glb pesa 5-13 MB). Requiere: git lfs install
+viewer/glb/*.glb filter=lfs diff=lfs merge=lfs -text
